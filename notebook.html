@@ -153,8 +153,45 @@ main{flex:1;display:flex;min-height:0}
 .note.sel .ntitle{color:var(--accent-text)}
 .ntitle{font-weight:600;font-size:13.5px;margin-bottom:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .nprev{font-size:12px;color:var(--text-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-bottom:3px}
-.nmeta{font-size:11px;color:var(--text-faint);display:flex;gap:6px;align-items:center}
+.nmeta{font-size:11px;color:var(--text-faint);display:flex;gap:6px;align-items:center;flex-wrap:wrap}
 .nmeta .badge{background:var(--border);color:var(--text-dim);padding:1px 5px;border-radius:4px;font-size:10px}
+.nmeta .tag{background:var(--accent-soft);color:var(--accent-text);padding:1px 6px;border-radius:10px;font-size:10px}
+
+/* 즐겨찾기 별 */
+.star{
+  position:absolute;top:6px;right:28px;width:20px;height:20px;border-radius:5px;
+  font-size:12px;line-height:1;display:none;align-items:center;justify-content:center;
+  background:var(--panel);color:var(--text-faint);
+}
+.note:hover .star{display:inline-flex}
+.note .star.on{display:inline-flex;color:#f59e0b;background:transparent}
+.star:hover{background:var(--hover)}
+
+/* 폴더 열의 특수 항목 (즐겨찾기 / 태그) */
+.navsec{
+  padding:12px 10px 4px;font-size:11px;font-weight:700;letter-spacing:.6px;
+  text-transform:uppercase;color:var(--text-faint);
+}
+.folder .fi.tagi{opacity:.7}
+
+/* 태그 바 */
+#tagBar{
+  display:none;align-items:center;gap:6px;flex-wrap:wrap;flex:0 0 auto;
+  padding:6px 10px;border-bottom:1px solid var(--border);background:var(--panel);
+}
+#tagBar.show{display:flex}
+#tagBar .chip{
+  display:inline-flex;align-items:center;gap:5px;padding:2px 6px 2px 9px;border-radius:11px;
+  background:var(--accent-soft);color:var(--accent-text);font-size:11.5px;font-weight:600;
+}
+#tagBar .chip button{color:inherit;opacity:.6;font-size:11px;line-height:1;padding:0 1px}
+#tagBar .chip button:hover{opacity:1}
+#tagInput{
+  width:118px;height:22px;padding:0 7px;border:1px dashed var(--border-strong);
+  border-radius:11px;background:transparent;outline:none;font-size:11.5px;
+}
+#tagInput:focus{border-style:solid;border-color:var(--accent);width:150px}
+#tagBar .hintlabel{font-size:11px;color:var(--text-faint)}
 .note .del{
   display:none;position:absolute;top:6px;right:6px;width:20px;height:20px;border-radius:5px;
   color:var(--text-dim);font-size:12px;line-height:1;align-items:center;justify-content:center;background:var(--panel);
@@ -371,6 +408,12 @@ body.dragging{cursor:col-resize;user-select:none}
         </div>
       </div>
 
+      <div id="tagBar">
+        <span class="hintlabel">태그</span>
+        <input id="tagInput" list="tagSuggest" placeholder="＋ 추가" autocomplete="off" spellcheck="false" maxlength="24">
+        <datalist id="tagSuggest"></datalist>
+      </div>
+
       <div id="editorArea">
         <div class="pane" id="paneEdit">
           <textarea id="mdInput" placeholder="여기에 마크다운으로 작성하세요…&#10;&#10;# 제목&#10;- 목록&#10;- [ ] 할 일&#10;**굵게**  *기울임*  `코드`&#10;&#10;이미지는 Ctrl+V 로 붙여넣거나 드래그해서 놓으세요." spellcheck="false"></textarea>
@@ -473,7 +516,7 @@ const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 
    settings — localStorage
    ============================================================ */
 const Settings = {
-  data: {theme:null, folderId:null, noteId:null, mode:"split", sort:"updated",
+  data: {theme:null, folderId:null, noteId:null, scope:null, mode:"split", sort:"updated",
          lastBackup:null, bannerDismissed:0, colFolders:216, colNotes:280},
   load(){
     try {
@@ -884,6 +927,7 @@ const Images = {
 const App = {
   folders: [], notes: [],
   folderId: null, noteId: null,
+  scope: {kind:"folder"},          // 노트 목록의 범위: folder | pinned | tag
   query: "", sort: "updated", mode: "split",
   saveTimer: null, prevTimer: null,
 
@@ -908,9 +952,23 @@ const App = {
     box.innerHTML = "";
     const counts = {};
     this.notes.forEach(n => counts[n.folderId] = (counts[n.folderId] || 0) + 1);
+    const active = k => !this.query && this.scope.kind === k;
+
+    // 즐겨찾기 (핀 고정된 노트가 있을 때만)
+    const pinned = this.notes.filter(n => n.pinned).length;
+    if (pinned){
+      const row = el("div", "folder" + (active("pinned") ? " sel" : ""));
+      row.innerHTML =
+        '<span class="fi">⭐</span><span class="fname">즐겨찾기</span>' +
+        '<span class="cnt">' + pinned + "</span>";
+      row.onclick = () => this.selectScope({kind:"pinned"});
+      box.appendChild(row);
+      box.appendChild(el("div", "navsec", "폴더"));
+    }
 
     this.folders.forEach(f => {
-      const row = el("div", "folder" + (f.id === this.folderId && !this.query ? " sel" : ""));
+      const row = el("div", "folder" +
+        (active("folder") && f.id === this.folderId ? " sel" : ""));
       row.dataset.id = f.id;
       row.innerHTML =
         '<span class="fi">📁</span>' +
@@ -936,6 +994,67 @@ const App = {
       };
       box.appendChild(row);
     });
+
+    // 태그 목록
+    const tags = this.allTags();
+    if (tags.length){
+      box.appendChild(el("div", "navsec", "태그"));
+      tags.forEach(t => {
+        const row = el("div", "folder" +
+          (active("tag") && this.scope.name === t.name ? " sel" : ""));
+        row.innerHTML =
+          '<span class="fi tagi">#</span><span class="fname">' + MD.esc(t.name) + "</span>" +
+          '<span class="cnt">' + t.count + "</span>" +
+          '<button class="menu" title="태그 메뉴">⋯</button>';
+        row.onclick = e => {
+          if (e.target.closest(".menu")) return;
+          this.selectScope({kind:"tag", name:t.name});
+        };
+        row.querySelector(".menu").onclick = e => {
+          e.stopPropagation();
+          this.tagMenu(t.name, e.currentTarget.getBoundingClientRect());
+        };
+        box.appendChild(row);
+      });
+    }
+  },
+
+  // 모든 노트에서 쓰인 태그를 사용 횟수와 함께 모은다
+  allTags(){
+    const map = new Map();
+    this.notes.forEach(n => (n.tags || []).forEach(t => map.set(t, (map.get(t) || 0) + 1)));
+    return Array.from(map, ([name, count]) => ({name, count}))
+                .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, "ko"));
+  },
+
+  tagMenu(name, rect){
+    Pop.show(rect, [
+      {text:"태그 이름 변경", action: async () => {
+        const next = await Dialog.prompt("태그 이름 변경", name, "변경");
+        if (!next) return;
+        const clean = this.cleanTag(next);
+        if (!clean) return;
+        for (const n of this.notes){
+          if (!(n.tags || []).includes(name)) continue;
+          n.tags = Array.from(new Set(n.tags.map(t => t === name ? clean : t)));
+          await this.saveNote(n);
+        }
+        if (this.scope.kind === "tag" && this.scope.name === name) this.scope = {kind:"tag", name:clean};
+        this.renderAll();
+        this.renderTagBar();
+      }},
+      {sep:true},
+      {text:"모든 노트에서 제거", danger:true, action: async () => {
+        if (!await Dialog.confirm("태그 제거", "'" + name + "' 태그를 모든 노트에서 제거합니다.", "제거", true)) return;
+        for (const n of this.notes){
+          if (!(n.tags || []).includes(name)) continue;
+          n.tags = n.tags.filter(t => t !== name);
+          await this.saveNote(n);
+        }
+        if (this.scope.kind === "tag" && this.scope.name === name) this.selectScope({kind:"folder"});
+        else { this.renderAll(); this.renderTagBar(); }
+      }}
+    ]);
   },
 
   folderMenu(f, rect){
@@ -964,7 +1083,8 @@ const App = {
     if (q){
       list = this.notes
         .map(n => {
-          const hay = (this.titleOf(n.body) + "\n" + MD.plain(n.body)).toLowerCase();
+          const hay = (this.titleOf(n.body) + "\n" + (n.tags || []).join(" ") +
+                       "\n" + MD.plain(n.body)).toLowerCase();
           const at = hay.indexOf(q);
           return at < 0 ? null : {n, at, hay};
         })
@@ -972,6 +1092,12 @@ const App = {
         .sort((a, b) => a.at - b.at || b.n.updatedAt - a.n.updatedAt)
         .map(r => r.n);
       $("#noteListTitle").textContent = "검색 결과 " + list.length;
+    } else if (this.scope.kind === "pinned"){
+      list = this.notes.filter(n => n.pinned);
+      $("#noteListTitle").textContent = "⭐ 즐겨찾기";
+    } else if (this.scope.kind === "tag"){
+      list = this.notes.filter(n => (n.tags || []).includes(this.scope.name));
+      $("#noteListTitle").textContent = "#" + this.scope.name;
     } else {
       list = this.notes.filter(n => n.folderId === this.folderId);
       $("#noteListTitle").textContent = folder ? folder.name : "노트";
@@ -981,11 +1107,16 @@ const App = {
       list.sort((a, b) => this.titleOf(a.body).localeCompare(this.titleOf(b.body), "ko"));
     else if (!q)
       list.sort((a, b) => b.updatedAt - a.updatedAt);
+    // 즐겨찾기는 항상 위로 (즐겨찾기 목록 자체와 검색 결과는 제외)
+    if (!q && this.scope.kind !== "pinned")
+      list.sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0));
 
     if (!list.length){
-      box.appendChild(el("div", "empty", q
-        ? "일치하는 노트가 없습니다."
-        : "이 폴더에 노트가 없습니다.<br>아래 <b>＋ 새 노트</b>를 눌러 시작하세요."));
+      const msg = q ? "일치하는 노트가 없습니다."
+        : this.scope.kind === "pinned" ? "즐겨찾기한 노트가 없습니다.<br>노트 목록의 ☆ 를 눌러 추가하세요."
+        : this.scope.kind === "tag" ? "이 태그가 붙은 노트가 없습니다."
+        : "이 폴더에 노트가 없습니다.<br>아래 <b>＋ 새 노트</b>를 눌러 시작하세요.";
+      box.appendChild(el("div", "empty", msg));
       return;
     }
 
@@ -1003,18 +1134,24 @@ const App = {
       } else {
         prevHtml = MD.esc(plain.slice(title.length).trim().slice(0, 90)) || "&nbsp;";
       }
-      const fname = q ? (this.folders.find(f => f.id === n.folderId) || {}).name : null;
+      // 폴더 이름은 검색·즐겨찾기·태그 목록처럼 여러 폴더가 섞일 때만 보여준다
+      const mixed = q || this.scope.kind !== "folder";
+      const fname = mixed ? (this.folders.find(f => f.id === n.folderId) || {}).name : null;
+      const tagHtml = (n.tags || []).map(t => '<span class="tag">#' + MD.esc(t) + "</span>").join("");
       row.innerHTML =
         '<div class="ntitle">' + titleHtml + "</div>" +
         '<div class="nprev">' + prevHtml + "</div>" +
         '<div class="nmeta">' + (fname ? '<span class="badge">' + MD.esc(fname) + "</span>" : "") +
-        "<span>" + fmtDate(n.updatedAt) + "</span></div>" +
+        tagHtml + "<span>" + fmtDate(n.updatedAt) + "</span></div>" +
+        '<button class="star' + (n.pinned ? " on" : "") + '" title="' +
+        (n.pinned ? "즐겨찾기 해제" : "즐겨찾기") + '">' + (n.pinned ? "★" : "☆") + "</button>" +
         '<button class="del" title="노트 삭제">🗑</button>';
 
       row.onclick = e => {
-        if (e.target.closest(".del")) return;
+        if (e.target.closest(".del") || e.target.closest(".star")) return;
         this.selectNote(n.id);
       };
+      row.querySelector(".star").onclick = e => { e.stopPropagation(); this.togglePin(n); };
       row.querySelector(".del").onclick = e => { e.stopPropagation(); this.deleteNote(n); };
       row.ondragstart = e => e.dataTransfer.setData("text/note-id", n.id);
       box.appendChild(row);
@@ -1048,9 +1185,63 @@ const App = {
       ta.disabled = true;
       $("#updatedAt").textContent = "";
     }
+    this.renderTagBar();
     this.renderPreview();
     this.renderStatus("저장됨");
   },
+
+  /* ---------- 태그 바 ---------- */
+  renderTagBar(){
+    const bar = $("#tagBar"), n = this.note;
+    bar.classList.toggle("show", !!n);
+    if (!n) return;
+    bar.querySelectorAll(".chip").forEach(c => c.remove());
+    const input = $("#tagInput");
+    (n.tags || []).forEach(t => {
+      const chip = el("span", "chip",
+        "#" + MD.esc(t) + '<button title="태그 제거">✕</button>');
+      chip.querySelector("button").onclick = () => this.removeTag(t);
+      bar.insertBefore(chip, input);
+    });
+    // 입력 자동완성 후보 = 이미 쓰인 태그 중 이 노트에 없는 것
+    $("#tagSuggest").innerHTML = this.allTags()
+      .filter(t => !(n.tags || []).includes(t.name))
+      .map(t => '<option value="' + MD.esc(t.name) + '">').join("");
+  },
+  cleanTag(raw){
+    return String(raw || "").trim().replace(/^#+/, "").replace(/\s+/g, " ").slice(0, 24);
+  },
+  async addTag(raw){
+    const n = this.note;
+    if (!n) return;
+    // 쉼표로 여러 개를 한 번에
+    const names = String(raw).split(",").map(t => this.cleanTag(t)).filter(Boolean);
+    if (!names.length) return;
+    n.tags = n.tags || [];
+    let added = 0;
+    names.forEach(name => {
+      if (n.tags.some(t => t.toLowerCase() === name.toLowerCase())) return;
+      n.tags.push(name);
+      added++;
+    });
+    if (!added) return;
+    await this.saveNote(n);
+    this.renderTagBar();
+    this.renderFolders();
+    this.renderNotes();
+  },
+  async removeTag(name){
+    const n = this.note;
+    if (!n) return;
+    n.tags = (n.tags || []).filter(t => t !== name);
+    await this.saveNote(n);
+    this.renderTagBar();
+    this.renderFolders();
+    if (this.scope.kind === "tag" && !this.allTags().some(t => t.name === this.scope.name))
+      this.selectScope({kind:"folder"});
+    else this.renderNotes();
+  },
+
   renderPreview(){
     const src = $("#mdInput").value;
     $("#preview").innerHTML = this.note
@@ -1078,9 +1269,19 @@ Object.assign(App, {
   selectFolder(id){
     this.folderId = id;
     Settings.set("folderId", id);
+    this.selectScope({kind:"folder"});
+  },
+
+  // 노트 목록에 무엇을 보여줄지 — 폴더 / 즐겨찾기 / 태그
+  selectScope(scope){
+    this.scope = scope;
+    Settings.set("scope", scope);
     if (this.query){ this.query = ""; $("#searchInput").value = ""; this.syncSearchUI(); }
-    const first = this.notes.filter(n => n.folderId === id)
-                            .sort((a, b) => b.updatedAt - a.updatedAt)[0];
+    const pool =
+      scope.kind === "pinned" ? this.notes.filter(n => n.pinned) :
+      scope.kind === "tag"    ? this.notes.filter(n => (n.tags || []).includes(scope.name)) :
+                                this.notes.filter(n => n.folderId === this.folderId);
+    const first = pool.slice().sort((a, b) => b.updatedAt - a.updatedAt)[0];
     this.noteId = first ? first.id : null;
     Settings.set("noteId", this.noteId);
     this.renderAll();
@@ -1091,7 +1292,8 @@ Object.assign(App, {
     this.flush();
     this.noteId = id;
     const n = this.note;
-    if (n && n.folderId !== this.folderId && !this.query) this.folderId = n.folderId;
+    if (n && n.folderId !== this.folderId && !this.query && this.scope.kind === "folder")
+      this.folderId = n.folderId;
     Settings.set("noteId", id);
     Settings.set("folderId", this.folderId);
     this.renderNotes();
@@ -1149,9 +1351,13 @@ Object.assign(App, {
   async newNote(){
     if (!this.folderId && this.folders[0]) this.folderId = this.folders[0].id;
     const now = Date.now();
-    const n = {id: uid(), folderId: this.folderId, body: "# ", createdAt: now, updatedAt: now};
+    const n = {id: uid(), folderId: this.folderId, body: "# ", pinned: false,
+               // 태그 목록을 보던 중이면 그 태그를 미리 붙여준다
+               tags: this.scope.kind === "tag" ? [this.scope.name] : [],
+               createdAt: now, updatedAt: now};
     this.notes.push(n);
     await DB.put("notes", n);
+    if (this.scope.kind === "pinned") this.scope = {kind:"folder"};
     this.query = ""; $("#searchInput").value = ""; this.syncSearchUI();
     this.noteId = n.id;
     Settings.set("noteId", n.id);
@@ -1176,6 +1382,30 @@ Object.assign(App, {
     }
     this.renderAll();
     toast("노트가 삭제되었습니다");
+  },
+
+  // 노트 레코드를 통째로 저장 (본문 외 속성 변경용)
+  async saveNote(n){
+    n.updatedAt = Date.now();
+    await DB.put("notes", {id:n.id, folderId:n.folderId, body:n.body, title:this.titleOf(n.body),
+                           pinned: !!n.pinned, tags: n.tags || [],
+                           createdAt:n.createdAt, updatedAt:n.updatedAt});
+  },
+
+  async togglePin(n){
+    n.pinned = !n.pinned;
+    await this.saveNote(n);
+    // 즐겨찾기 목록에서 해제하면 그 노트가 목록에서 빠진다
+    if (this.scope.kind === "pinned" && !n.pinned && this.noteId === n.id){
+      const rest = this.notes.filter(x => x.pinned).sort((a, b) => b.updatedAt - a.updatedAt);
+      this.noteId = rest.length ? rest[0].id : null;
+      Settings.set("noteId", this.noteId);
+      this.renderAll();
+    } else {
+      this.renderFolders();
+      this.renderNotes();
+    }
+    toast(n.pinned ? "즐겨찾기에 추가됨" : "즐겨찾기 해제됨");
   },
 
   async moveNote(id, folderId){
@@ -1206,11 +1436,8 @@ Object.assign(App, {
     const body = $("#mdInput").value;
     if (body === n.savedBody) return;
     n.body = body;
-    n.updatedAt = Date.now();
     n.savedBody = body;
-    const rec = {id:n.id, folderId:n.folderId, body:n.body, title:this.titleOf(n.body),
-                 createdAt:n.createdAt, updatedAt:n.updatedAt};
-    await DB.put("notes", rec);
+    await this.saveNote(n);
     this.renderStatus("저장됨");
     $("#updatedAt").textContent = "수정 " + fmtFull(n.updatedAt);
     this.renderNotes();
@@ -1342,7 +1569,8 @@ const Backup = {
       exportedAt: new Date().toISOString(),
       folders: App.folders.map(f => ({id:f.id, name:f.name, order:f.order, createdAt:f.createdAt})),
       notes: App.notes.map(n => ({id:n.id, folderId:n.folderId, body:n.body,
-                                  title:App.titleOf(n.body), createdAt:n.createdAt, updatedAt:n.updatedAt})),
+                                  title:App.titleOf(n.body), pinned: !!n.pinned, tags: n.tags || [],
+                                  createdAt:n.createdAt, updatedAt:n.updatedAt})),
       images
     };
     const d = new Date(), p = x => String(x).padStart(2, "0");
@@ -1393,6 +1621,7 @@ const Backup = {
       if (mode === "merge" && App.notes.some(x => x.id === id)) id = uid();
       const rec = {id, folderId: idMap[n.folderId] || (App.folders[0] || {}).id,
                    body: n.body || "", title: n.title || "",
+                   pinned: !!n.pinned, tags: Array.isArray(n.tags) ? n.tags : [],
                    createdAt: n.createdAt || Date.now(), updatedAt: n.updatedAt || Date.now()};
       App.notes.push(rec);
       await DB.put("notes", rec);
@@ -1403,6 +1632,7 @@ const Backup = {
                               createdAt: im.createdAt || Date.now()});
     }
     App.folderId = (App.folders[0] || {}).id || null;
+    App.scope = {kind:"folder"};
     const first = App.notes.filter(n => n.folderId === App.folderId)
                            .sort((a, b) => b.updatedAt - a.updatedAt)[0];
     App.noteId = first ? first.id : null;
@@ -1478,6 +1708,26 @@ function bind(){
 
   // 좁은 화면 뒤로가기
   document.querySelectorAll(".backbtn").forEach(b => b.onclick = () => App.setView(b.dataset.viewTo));
+
+  // 태그 입력
+  const ti = $("#tagInput");
+  ti.onkeydown = e => {
+    if (e.key === "Enter" || e.key === ","){
+      e.preventDefault();
+      App.addTag(ti.value);
+      ti.value = "";
+    } else if (e.key === "Backspace" && !ti.value){
+      const tags = (App.note || {}).tags || [];
+      if (tags.length) App.removeTag(tags[tags.length - 1]);
+    } else if (e.key === "Escape"){
+      ti.value = ""; ti.blur();
+    }
+  };
+  ti.onblur = () => { if (ti.value.trim()){ App.addTag(ti.value); ti.value = ""; } };
+  // 자동완성 목록에서 고르면 바로 추가된다
+  ti.oninput = () => {
+    if (App.allTags().some(t => t.name === ti.value)){ App.addTag(ti.value); ti.value = ""; }
+  };
 
   // 편집
   ta.oninput = () => App.onInput();
@@ -1561,6 +1811,8 @@ function bind(){
     else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s"){ e.preventDefault(); App.flush().then(() => toast("저장됨")); }
     else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "e"){ e.preventDefault(); App.newNote(); }
     else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "p"){ e.preventDefault(); App.setMode(App.mode === "prev" ? "split" : "prev"); }
+    else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "d"){ e.preventDefault(); if (App.note) App.togglePin(App.note); }
+    else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "g"){ e.preventDefault(); if (App.note) $("#tagInput").focus(); }
   });
 
   // 열 너비 조절
@@ -1602,6 +1854,7 @@ function showHelp(){
   Dialog.open(
     "<h3>단축키</h3><p>" +
     ["Ctrl+F  전체 검색", "Ctrl+E  새 노트", "Ctrl+S  즉시 저장", "Ctrl+P  미리보기 전환",
+     "Ctrl+D  즐겨찾기 토글", "Ctrl+G  태그 입력",
      "Ctrl+B / Ctrl+I / Ctrl+K  굵게 / 기울임 / 링크",
      "Tab / Shift+Tab  들여쓰기 / 내어쓰기",
      "Ctrl+V  이미지 붙여넣기", "노트를 폴더로 드래그하면 이동합니다"].join("\n") +
@@ -1688,13 +1941,29 @@ async function init(){
   }
 
   App.folders.sort((a, b) => (a.order || 0) - (b.order || 0) || (a.createdAt || 0) - (b.createdAt || 0));
-  App.notes.forEach(n => n.savedBody = n.body);
+  // 이전 버전에서 만든 노트에는 pinned/tags 가 없다
+  App.notes.forEach(n => {
+    n.savedBody = n.body;
+    n.pinned = !!n.pinned;
+    if (!Array.isArray(n.tags)) n.tags = [];
+  });
 
   App.folderId = App.folders.some(f => f.id === st.folderId) ? st.folderId : App.folders[0].id;
-  const inFolder = App.notes.filter(n => n.folderId === App.folderId)
-                            .sort((a, b) => b.updatedAt - a.updatedAt);
-  App.noteId = App.notes.some(n => n.id === st.noteId && n.folderId === App.folderId)
-    ? st.noteId : (inFolder[0] ? inFolder[0].id : null);
+
+  // 마지막으로 보던 범위 복원 (대상이 사라졌으면 폴더로)
+  const sc = st.scope;
+  if (sc && sc.kind === "pinned" && App.notes.some(n => n.pinned)) App.scope = {kind:"pinned"};
+  else if (sc && sc.kind === "tag" && App.notes.some(n => n.tags.includes(sc.name)))
+    App.scope = {kind:"tag", name:sc.name};
+  else App.scope = {kind:"folder"};
+
+  const pool =
+    App.scope.kind === "pinned" ? App.notes.filter(n => n.pinned) :
+    App.scope.kind === "tag"    ? App.notes.filter(n => n.tags.includes(App.scope.name)) :
+                                  App.notes.filter(n => n.folderId === App.folderId);
+  const sorted = pool.slice().sort((a, b) => b.updatedAt - a.updatedAt);
+  App.noteId = pool.some(n => n.id === st.noteId)
+    ? st.noteId : (sorted[0] ? sorted[0].id : null);
 
   bind();
   App.renderAll();
