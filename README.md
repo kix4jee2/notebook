@@ -3,9 +3,13 @@
 OneNote 스타일의 개인용 노트 앱. **`notebook.html` 파일 하나**가 전부다.
 설치·서버·계정·인터넷 연결이 필요 없다.
 
+**바로 쓰기**: <https://kix4jee2.github.io/notebook/> — 또는 `notebook.html` 을 내려받아 더블클릭.
+
 ## 사용법
 
-`notebook.html` 을 더블클릭해 브라우저(Chrome, Edge, Firefox)로 연다.
+`notebook.html` 을 더블클릭해 브라우저(Chrome, Edge, Firefox)로 열거나, 위 주소로 접속한다.
+어느 쪽이든 **노트는 그 브라우저에만** 저장된다. 즉 배포 주소와 로컬 파일은 서로 다른 저장소를
+쓰고, 링크를 받은 다른 사람에게는 빈 노트북이 열린다 (공유되는 것은 앱이지 노트가 아니다).
 
 ```
 ┌──────────┬───────────────┬──────────────────────┐
@@ -114,6 +118,15 @@ notebook (IndexedDB)
 - 마지막 백업이 7일을 넘기면 상단에 알림 배너가 뜬다.
 
 정기적으로 .json 백업을 클라우드 드라이브 등에 보관해 두는 것을 권한다.
+
+## 배포
+
+이 저장소는 GitHub Pages 로 <https://kix4jee2.github.io/notebook/> 에 배포되어 있다.
+`main` 브랜치에 푸시하면 1~2분 뒤 자동으로 갱신된다. `index.html` 은 `notebook.html` 로
+넘겨주는 진입점일 뿐이고, 앱 본체는 여전히 `notebook.html` 파일 하나다.
+
+다른 정적 호스팅(Netlify, Cloudflare Pages 등)에 올릴 때도 두 파일을 그대로 두면 된다.
+`https://` 로 열면 IndexedDB 가 확실히 동작하므로 localStorage 폴백을 탈 일이 없다.
 
 ## 참고
 
