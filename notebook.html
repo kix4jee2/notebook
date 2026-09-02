@@ -156,6 +156,7 @@ main{flex:1;display:flex;min-height:0}
 .nmeta{font-size:11px;color:var(--text-faint);display:flex;gap:6px;align-items:center;flex-wrap:wrap}
 .nmeta .badge{background:var(--border);color:var(--text-dim);padding:1px 5px;border-radius:4px;font-size:10px}
 .nmeta .tag{background:var(--accent-soft);color:var(--accent-text);padding:1px 6px;border-radius:10px;font-size:10px}
+.nmeta .hitcnt{background:var(--mark);color:var(--text);padding:1px 5px;border-radius:4px;font-size:10px;font-weight:600}
 
 /* 즐겨찾기 별 */
 .star{
@@ -192,6 +193,31 @@ main{flex:1;display:flex;min-height:0}
 }
 #tagInput:focus{border-style:solid;border-color:var(--accent);width:150px}
 #tagBar .hintlabel{font-size:11px;color:var(--text-faint)}
+
+/* 본문 찾기 바 */
+#findBar{
+  display:none;align-items:center;gap:6px;flex:0 0 auto;
+  padding:6px 10px;border-bottom:1px solid var(--border);background:var(--panel-2);
+}
+#findBar.show{display:flex}
+#findInput{
+  flex:1;max-width:280px;height:26px;padding:0 9px;border:1px solid var(--border-strong);
+  border-radius:7px;background:var(--panel);outline:none;font-size:13px;
+}
+#findInput:focus{border-color:var(--accent)}
+#findInput.nohit{border-color:var(--danger);color:var(--danger)}
+#findCount{font-size:11.5px;color:var(--text-faint);min-width:44px;text-align:center}
+#findBar .navbtn{
+  width:24px;height:24px;border-radius:6px;color:var(--text-dim);font-size:12px;
+  display:inline-flex;align-items:center;justify-content:center;
+}
+#findBar .navbtn:hover{background:var(--hover);color:var(--text)}
+#findBar .navbtn:disabled{opacity:.35;cursor:default}
+#findBar .spacer{flex:1}
+
+/* 본문 찾기 하이라이트 */
+mark.find{background:var(--mark);color:inherit;border-radius:2px}
+mark.find.cur{background:var(--accent);color:#fff}
 .note .del{
   display:none;position:absolute;top:6px;right:6px;width:20px;height:20px;border-radius:5px;
   color:var(--text-dim);font-size:12px;line-height:1;align-items:center;justify-content:center;background:var(--panel);
@@ -343,7 +369,7 @@ body.dragging{cursor:col-resize;user-select:none}
     <div class="brand"><span class="logo">📓</span><span>Notebook</span></div>
     <div class="search-wrap">
       <span class="ico">🔍</span>
-      <input id="searchInput" type="search" placeholder="모든 노트 검색…  (Ctrl+F)" autocomplete="off" spellcheck="false">
+      <input id="searchInput" type="search" placeholder="모든 노트 검색…  #태그 가능  (Ctrl+Shift+F)" autocomplete="off" spellcheck="false">
       <button id="searchClear" title="검색 지우기">✕</button>
     </div>
     <div class="spacer"></div>
@@ -412,6 +438,16 @@ body.dragging{cursor:col-resize;user-select:none}
         <span class="hintlabel">태그</span>
         <input id="tagInput" list="tagSuggest" placeholder="＋ 추가" autocomplete="off" spellcheck="false" maxlength="24">
         <datalist id="tagSuggest"></datalist>
+      </div>
+
+      <div id="findBar">
+        <span>🔎</span>
+        <input id="findInput" type="text" placeholder="이 노트에서 찾기" autocomplete="off" spellcheck="false">
+        <span id="findCount">0/0</span>
+        <button class="navbtn" id="findPrev" title="이전 (Shift+Enter)">∧</button>
+        <button class="navbtn" id="findNext" title="다음 (Enter)">∨</button>
+        <div class="spacer"></div>
+        <button class="navbtn" id="findClose" title="닫기 (Esc)">✕</button>
       </div>
 
       <div id="editorArea">
@@ -1080,17 +1116,27 @@ const App = {
     const folder = this.folders.find(f => f.id === this.folderId);
     let list;
 
+    this.hits = {};                    // 노트별 매치 개수 (검색 중일 때만 채워진다)
     if (q){
+      const {tags, terms} = this.parseQuery(q);
       list = this.notes
         .map(n => {
-          const hay = (this.titleOf(n.body) + "\n" + (n.tags || []).join(" ") +
-                       "\n" + MD.plain(n.body)).toLowerCase();
-          const at = hay.indexOf(q);
-          return at < 0 ? null : {n, at, hay};
+          // 태그 조건은 모두 만족해야 한다
+          const own = (n.tags || []).map(t => t.toLowerCase());
+          if (!tags.every(t => own.includes(t))) return null;
+          // 본문은 원문 그대로 매칭 — 코드 블록·링크 URL 안의 글자도 걸린다
+          const hay = (this.titleOf(n.body) + "\n" + own.join(" ") + "\n" + n.body).toLowerCase();
+          if (!terms.every(t => hay.includes(t))) return null;
+          if (!terms.length) return {n, at: 0, count: 0};   // 태그만으로 검색한 경우
+          const first = terms[0];
+          let count = 0, from = 0, at;
+          while ((at = hay.indexOf(first, from)) >= 0){ count++; from = at + first.length; }
+          return {n, at: hay.indexOf(first), count};
         })
         .filter(Boolean)
-        .sort((a, b) => a.at - b.at || b.n.updatedAt - a.n.updatedAt)
-        .map(r => r.n);
+        .sort((a, b) => a.at - b.at || b.n.updatedAt - a.n.updatedAt);
+      list.forEach(r => this.hits[r.n.id] = r.count);
+      list = list.map(r => r.n);
       $("#noteListTitle").textContent = "검색 결과 " + list.length;
     } else if (this.scope.kind === "pinned"){
       list = this.notes.filter(n => n.pinned);
@@ -1129,11 +1175,13 @@ const App = {
 
       let prevHtml, titleHtml = MD.esc(title);
       if (q){
-        titleHtml = this.highlight(title, q);
-        prevHtml = this.snippet(plain, q);
+        const term = this.parseQuery(q).terms[0] || "";
+        titleHtml = term ? this.highlight(title, term) : MD.esc(title);
+        prevHtml = term ? this.snippet(plain, term, n.body) : MD.esc(plain.slice(0, 90));
       } else {
         prevHtml = MD.esc(plain.slice(title.length).trim().slice(0, 90)) || "&nbsp;";
       }
+      const cnt = this.hits[n.id] || 0;
       // 폴더 이름은 검색·즐겨찾기·태그 목록처럼 여러 폴더가 섞일 때만 보여준다
       const mixed = q || this.scope.kind !== "folder";
       const fname = mixed ? (this.folders.find(f => f.id === n.folderId) || {}).name : null;
@@ -1142,7 +1190,8 @@ const App = {
         '<div class="ntitle">' + titleHtml + "</div>" +
         '<div class="nprev">' + prevHtml + "</div>" +
         '<div class="nmeta">' + (fname ? '<span class="badge">' + MD.esc(fname) + "</span>" : "") +
-        tagHtml + "<span>" + fmtDate(n.updatedAt) + "</span></div>" +
+        tagHtml + (cnt > 1 ? '<span class="hitcnt">' + cnt + "건</span>" : "") +
+        "<span>" + fmtDate(n.updatedAt) + "</span></div>" +
         '<button class="star' + (n.pinned ? " on" : "") + '" title="' +
         (n.pinned ? "즐겨찾기 해제" : "즐겨찾기") + '">' + (n.pinned ? "★" : "☆") + "</button>" +
         '<button class="del" title="노트 삭제">🗑</button>';
@@ -1158,13 +1207,27 @@ const App = {
     });
   },
 
+  // "#업무 회의 예산" → {tags:["업무"], terms:["회의","예산"]}
+  parseQuery(q){
+    const tags = [], terms = [];
+    String(q).toLowerCase().split(/\s+/).forEach(tok => {
+      if (!tok) return;
+      if (tok.length > 1 && tok[0] === "#") tags.push(tok.slice(1));
+      else terms.push(tok);
+    });
+    return {tags, terms};
+  },
+
   highlight(text, q){
     const i = text.toLowerCase().indexOf(q);
     if (i < 0) return MD.esc(text);
     return MD.esc(text.slice(0, i)) + "<mark>" + MD.esc(text.slice(i, i + q.length)) +
            "</mark>" + MD.esc(text.slice(i + q.length));
   },
-  snippet(plain, q){
+  // 평문에서 못 찾으면(코드 블록 안 등) 원문에서 잘라 보여준다
+  snippet(plain, q, raw){
+    if (plain.toLowerCase().indexOf(q) < 0 && raw && raw.toLowerCase().indexOf(q) >= 0)
+      plain = String(raw).replace(/\s+/g, " ").trim();
     const i = plain.toLowerCase().indexOf(q);
     if (i < 0) return MD.esc(plain.slice(0, 90));
     const from = Math.max(0, i - 24);
@@ -1188,6 +1251,7 @@ const App = {
     this.renderTagBar();
     this.renderPreview();
     this.renderStatus("저장됨");
+    if (this.find.open) this.findRun(false);   // 노트가 바뀌면 매치를 다시 센다
   },
 
   /* ---------- 태그 바 ---------- */
@@ -1247,6 +1311,121 @@ const App = {
     $("#preview").innerHTML = this.note
       ? MD.render(src, {resolveImg: s => Images.resolve(s)})
       : '<div class="empty">선택된 노트가 없습니다.</div>';
+    if (this.find.open && this.find.q) this.markPreview();
+  },
+
+  /* ---------- 본문 찾기 ---------- */
+  find: {open:false, q:"", idx:0, hits:[]},
+
+  findOpen(seed){
+    const bar = $("#findBar"), inp = $("#findInput");
+    this.find.open = true;
+    bar.classList.add("show");
+    // 에디터에서 선택한 텍스트가 있으면 그걸로 시작
+    const ta = $("#mdInput");
+    const sel = ta.value.slice(ta.selectionStart, ta.selectionEnd);
+    const q = seed || (sel && sel.length <= 60 && !/\n/.test(sel) ? sel : inp.value);
+    inp.value = q || "";
+    inp.focus(); inp.select();
+    this.findRun(true);
+  },
+  findClose(){
+    this.find.open = false;
+    this.find.q = "";
+    $("#findBar").classList.remove("show");
+    $("#findInput").classList.remove("nohit");
+    this.clearMarks();
+    if (this.mode !== "prev" && this.note) $("#mdInput").focus();
+  },
+  // 원문에서 매치 위치를 모두 모은다 (대소문자 무시)
+  findRun(jump){
+    const q = $("#findInput").value;
+    const body = $("#mdInput").value;
+    this.find.q = q;
+    this.find.hits = [];
+    if (q){
+      const hay = body.toLowerCase(), needle = q.toLowerCase();
+      let at = 0;
+      while ((at = hay.indexOf(needle, at)) >= 0){
+        this.find.hits.push(at);
+        at += needle.length;
+      }
+    }
+    if (this.find.idx >= this.find.hits.length) this.find.idx = 0;
+    $("#findInput").classList.toggle("nohit", !!q && !this.find.hits.length);
+    this.renderFindCount();
+    this.markPreview();
+    if (jump && this.find.hits.length) this.findGo(this.find.idx);
+  },
+  renderFindCount(){
+    const {hits, idx} = this.find;
+    $("#findCount").textContent = (hits.length ? idx + 1 : 0) + "/" + hits.length;
+    $("#findPrev").disabled = $("#findNext").disabled = hits.length < 2;
+  },
+  findStep(delta){
+    const n = this.find.hits.length;
+    if (!n) return;
+    this.find.idx = (this.find.idx + delta + n) % n;   // 끝에서 처음으로 순환
+    this.renderFindCount();
+    this.findGo(this.find.idx);
+  },
+  // 편집 영역은 선택 + 스크롤, 미리보기는 현재 매치 강조
+  findGo(i){
+    const start = this.find.hits[i], len = this.find.q.length;
+    const ta = $("#mdInput");
+    if (!ta.disabled){
+      ta.setSelectionRange(start, start + len);
+      // 매치가 있는 줄이 대략 화면 가운데 오도록
+      const before = ta.value.slice(0, start).split("\n").length - 1;
+      const lineH = parseFloat(getComputedStyle(ta).lineHeight) || 22;
+      ta.scrollTop = Math.max(0, before * lineH - ta.clientHeight / 2);
+    }
+    this.markPreview();
+    const cur = $("#preview").querySelector("mark.find.cur");
+    if (cur) cur.scrollIntoView({block:"center"});
+  },
+
+  clearMarks(){
+    const box = $("#preview");
+    box.querySelectorAll("mark.find").forEach(m => {
+      const t = document.createTextNode(m.textContent);
+      m.replaceWith(t);
+    });
+    box.normalize();
+  },
+  // 미리보기의 텍스트 노드만 순회해 감싼다 — HTML 문자열을 만들지 않으므로 주입 위험이 없다
+  markPreview(){
+    this.clearMarks();
+    const q = this.find.q;
+    if (!this.find.open || !q) return;
+    const box = $("#preview"), needle = q.toLowerCase();
+    const walker = document.createTreeWalker(box, NodeFilter.SHOW_TEXT, {
+      acceptNode: node => node.nodeValue && node.nodeValue.trim() &&
+        !/^(SCRIPT|STYLE|MARK)$/.test(node.parentNode.nodeName)
+          ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT
+    });
+    const targets = [];
+    let node;
+    while ((node = walker.nextNode())) targets.push(node);
+
+    let seen = 0;
+    targets.forEach(t => {
+      const text = t.nodeValue, low = text.toLowerCase();
+      if (low.indexOf(needle) < 0) return;
+      const frag = document.createDocumentFragment();
+      let from = 0, at;
+      while ((at = low.indexOf(needle, from)) >= 0){
+        if (at > from) frag.appendChild(document.createTextNode(text.slice(from, at)));
+        const m = document.createElement("mark");
+        m.className = "find" + (seen === this.find.idx ? " cur" : "");
+        m.textContent = text.slice(at, at + q.length);
+        frag.appendChild(m);
+        seen++;
+        from = at + q.length;
+      }
+      if (from < text.length) frag.appendChild(document.createTextNode(text.slice(from)));
+      t.replaceWith(frag);
+    });
   },
   renderStatus(state){
     const s = $("#saveState");
@@ -1299,7 +1478,10 @@ Object.assign(App, {
     this.renderNotes();
     this.renderEditor();
     if (innerWidth <= 900) this.setView("editor");
-    if (this.mode !== "prev") $("#mdInput").focus();
+    // 전체 검색 결과에서 연 노트라면 그 단어를 본문 찾기로 넘겨 바로 훑을 수 있게 한다
+    const term = this.query ? this.parseQuery(this.query).terms[0] : "";
+    if (term) this.findOpen(term);
+    else if (this.mode !== "prev") $("#mdInput").focus();
   },
 
   async newFolder(){
@@ -1425,7 +1607,10 @@ Object.assign(App, {
     n.body = $("#mdInput").value;
     this.renderStatus("저장 중…");
     clearTimeout(this.prevTimer);
-    this.prevTimer = setTimeout(() => this.renderPreview(), 90);
+    this.prevTimer = setTimeout(() => {
+      this.renderPreview();
+      if (this.find.open) this.findRun(false);   // 본문이 바뀌면 매치 위치도 바뀐다
+    }, 90);
     clearTimeout(this.saveTimer);
     this.saveTimer = setTimeout(() => this.flush(), 400);
   },
@@ -1709,6 +1894,21 @@ function bind(){
   // 좁은 화면 뒤로가기
   document.querySelectorAll(".backbtn").forEach(b => b.onclick = () => App.setView(b.dataset.viewTo));
 
+  // 본문 찾기 바
+  const fi = $("#findInput");
+  let findTimer = null;
+  fi.oninput = () => {
+    clearTimeout(findTimer);
+    findTimer = setTimeout(() => { App.find.idx = 0; App.findRun(true); }, 120);
+  };
+  fi.onkeydown = e => {
+    if (e.key === "Enter"){ e.preventDefault(); App.findStep(e.shiftKey ? -1 : 1); }
+    else if (e.key === "Escape"){ e.preventDefault(); App.findClose(); }
+  };
+  $("#findNext").onclick = () => App.findStep(1);
+  $("#findPrev").onclick = () => App.findStep(-1);
+  $("#findClose").onclick = () => App.findClose();
+
   // 태그 입력
   const ti = $("#tagInput");
   ti.onkeydown = e => {
@@ -1807,7 +2007,15 @@ function bind(){
 
   // 전역 단축키
   document.addEventListener("keydown", e => {
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "f"){ e.preventDefault(); si.focus(); si.select(); }
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "f"){
+      e.preventDefault();
+      // Ctrl+F 는 이 노트 안에서 찾기, Ctrl+Shift+F 는 모든 노트 검색
+      if (e.shiftKey){ si.focus(); si.select(); }
+      else if (App.note) App.findOpen();
+      else { si.focus(); si.select(); }
+    }
+    else if (e.key === "F3"){ e.preventDefault(); if (App.find.open) App.findStep(e.shiftKey ? -1 : 1); else if (App.note) App.findOpen(); }
+    else if (e.key === "Escape" && App.find.open && !$("#mask").classList.contains("show")){ App.findClose(); }
     else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s"){ e.preventDefault(); App.flush().then(() => toast("저장됨")); }
     else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "e"){ e.preventDefault(); App.newNote(); }
     else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "p"){ e.preventDefault(); App.setMode(App.mode === "prev" ? "split" : "prev"); }
@@ -1853,7 +2061,9 @@ function bind(){
 function showHelp(){
   Dialog.open(
     "<h3>단축키</h3><p>" +
-    ["Ctrl+F  전체 검색", "Ctrl+E  새 노트", "Ctrl+S  즉시 저장", "Ctrl+P  미리보기 전환",
+    ["Ctrl+F  이 노트에서 찾기 (F3 / Shift+F3 다음·이전)",
+     "Ctrl+Shift+F  모든 노트 검색  (#태그 로 태그 한정)",
+     "Ctrl+E  새 노트", "Ctrl+S  즉시 저장", "Ctrl+P  미리보기 전환",
      "Ctrl+D  즐겨찾기 토글", "Ctrl+G  태그 입력",
      "Ctrl+B / Ctrl+I / Ctrl+K  굵게 / 기울임 / 링크",
      "Tab / Shift+Tab  들여쓰기 / 내어쓰기",
